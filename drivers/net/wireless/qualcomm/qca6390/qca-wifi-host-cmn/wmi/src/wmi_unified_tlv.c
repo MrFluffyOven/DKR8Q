@@ -1825,9 +1825,10 @@ static QDF_STATUS send_wow_enable_cmd_tlv(wmi_unified_t wmi_handle,
 		cmd->pause_iface_config = WOW_IFACE_PAUSE_DISABLED;
 	cmd->flags = param->flags;
 
-	WMI_LOGI("suspend type: %s",
-		cmd->pause_iface_config == WOW_IFACE_PAUSE_ENABLED ?
-		"WOW_IFACE_PAUSE_ENABLED" : "WOW_IFACE_PAUSE_DISABLED");
+	wmi_info("suspend type: %s flag is 0x%x",
+		 cmd->pause_iface_config == WOW_IFACE_PAUSE_ENABLED ?
+		 "WOW_IFACE_PAUSE_ENABLED" : "WOW_IFACE_PAUSE_DISABLED",
+		 cmd->flags);
 
 	wmi_mtrace(WMI_WOW_ENABLE_CMDID, NO_SESSION, 0);
 	ret = wmi_unified_cmd_send(wmi_handle, buf, len,
@@ -3303,6 +3304,10 @@ static QDF_STATUS send_scan_chan_list_cmd_tlv(wmi_unified_t wmi_handle,
 			if (tchan_info->psc_channel)
 				WMI_SET_CHANNEL_FLAG(chan_info,
 						     WMI_CHAN_FLAG_PSC);
+
+			if (tchan_info->nan_disabled)
+				WMI_SET_CHANNEL_FLAG(chan_info,
+					     WMI_CHAN_FLAG_NAN_DISABLED);
 
 			/* also fill in power information */
 			WMI_SET_CHANNEL_MIN_POWER(chan_info,
@@ -6664,6 +6669,19 @@ static void wmi_copy_twt_resource_config(wmi_resource_config *resource_cfg,
 }
 #endif
 
+#ifdef WLAN_FEATURE_NAN
+static void wmi_set_nan_channel_support(wmi_resource_config *resource_cfg)
+{
+	WMI_RSRC_CFG_HOST_SERVICE_FLAG_NAN_CHANNEL_SUPPORT_SET(
+		resource_cfg->host_service_flags, 1);
+}
+#else
+static inline
+void wmi_set_nan_channel_support(wmi_resource_config *resource_cfg)
+{
+}
+#endif
+
 static
 void wmi_copy_resource_config(wmi_resource_config *resource_cfg,
 				target_resource_config *tgt_res_cfg)
@@ -6871,6 +6889,7 @@ void wmi_copy_resource_config(wmi_resource_config *resource_cfg,
 		resource_cfg->host_service_flags,
 		tgt_res_cfg->nan_separate_iface_support);
 
+	wmi_set_nan_channel_support(resource_cfg);
 }
 
 /* copy_hw_mode_id_in_init_cmd() - Helper routine to copy hw_mode in init cmd
@@ -12944,6 +12963,15 @@ extract_roam_scan_stats_tlv(wmi_unified_t wmi_handle, void *evt_buf,
 			dst->num_chan = MAX_ROAM_SCAN_CHAN;
 
 		src_chan = &param_buf->roam_scan_chan_info[chan_idx];
+
+		if ((dst->num_chan + chan_idx) >
+		    param_buf->num_roam_scan_chan_info) {
+			wmi_err("Invalid TLV. num_chan %d chan_idx %d num_roam_scan_chan_info %d",
+				dst->num_chan, chan_idx,
+				param_buf->num_roam_scan_chan_info);
+			return QDF_STATUS_SUCCESS;
+		}
+
 		for (i = 0; i < dst->num_chan; i++) {
 			dst->chan_freq[i] = src_chan->channel;
 			src_chan++;
@@ -13050,6 +13078,14 @@ extract_roam_11kv_stats_tlv(wmi_unified_t wmi_handle, void *evt_buf,
 
 	if (dst->num_freq > MAX_ROAM_SCAN_CHAN)
 		dst->num_freq = MAX_ROAM_SCAN_CHAN;
+
+	if ((dst->num_freq + rpt_idx) >
+	    param_buf->num_roam_neighbor_report_chan_info) {
+		wmi_err("Invalid TLV. num_freq %d rpt_idx %d num_roam_neighbor_report_chan_info %d",
+			dst->num_freq, rpt_idx,
+			param_buf->num_roam_scan_chan_info);
+		return QDF_STATUS_SUCCESS;
+	}
 
 	for (i = 0; i < dst->num_freq; i++) {
 		dst->freq[i] = src_freq->channel;
